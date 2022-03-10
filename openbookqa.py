@@ -16,6 +16,10 @@ import time
 import sys
 import json
 import numpy as np
+import spacy 
+spacy.prefer_gpu()
+nlp = spacy.load("en_core_web_trf")
+
 
 DIM_SIZES = [50, 100, 200, 300]
 DIM_SIZE = ''
@@ -24,7 +28,9 @@ model_chkpt = "bert-base-uncased"
 tokenizer  = AutoTokenizer.from_pretrained(model_chkpt, use_fast=True)
 model = AutoModelForMultipleChoice.from_pretrained(model_chkpt)
 glove_embeddings = {}
-
+noun_dict_train = {}
+noun_dict_test = {}
+noun_dict_valid = {}
 
 def cos_sim(vec1, vec2):
     dot_product = np.dot(vec1, vec2)
@@ -39,7 +45,7 @@ def load_glove_embeddings(dim_size):
     else:
         DIM_SIZE = dim_size
         filename = 'glove_embeddings/glove.6B.' + str(dim_size) + 'd.txt'
-        with open(filename, 'r') as file:
+        with open(filename, 'r', encoding='utf-8') as file:
             content = file.readlines()
             for line in content:
                 content_line_split = line.split()
@@ -63,101 +69,183 @@ def get_token_embeddings(token_seq):
 
     return embedding
 
-def eliminate_choice(dataset: dict):
+def get_spacy_info(token_seq):
+    nouns = []
+    # Run spaCy over string
+    doc = nlp(token_seq)
+    # lemmatized text, pos for nouns in string
+    for token in doc:
+        nouns.append(token.lemma_) 
+    if len(nouns) == 0:
+        pdb.set_trace()
+    return nouns
+
+def fill_noun_dicts(dataset:dict):
+    # Globals
+    global noun_dict_train
+    global noun_dict_test
+    global nound_dict_valid
+    # Get list of answer keys
+    answer_list = ['A', 'B', 'C', 'D']
     # Get Dataset Dicts
     train_dict = dataset['train']
     test_dict = dataset['test']
     valid_dict = dataset['validation']
+    # loop count
+    loop_count = 0
+    for ex_idx in range(len(train_dict)):
+        # test
+        if loop_count < len(test_dict):
+            # Get question stem && add to nouns to dict
+            question_stem = test_dict[ex_idx]['question.stem']
+            noun_dict_test[question_stem] = get_spacy_info(question_stem)
+            if len(noun_dict_test[question_stem]) == 0:
+                pdb.set_trace()
+            # Loop through all 4 possible answers and add nouns to dict
+            for answer_letter in answer_list:
+                answer = test_dict[ex_idx][answer_letter]
+                key = (question_stem, answer)
+                noun_dict_test[key] = get_spacy_info(answer)
+
+        # Valid
+        if loop_count < len(valid_dict):
+                # Get question stem && add to nouns to dict
+                question_stem = valid_dict[ex_idx]['question.stem']
+                noun_dict_valid[question_stem] = get_spacy_info(question_stem)
+                if len(noun_dict_valid[question_stem]) == 0:
+                    pdb.set_trace()
+                # Loop through all 4 possible answers and add nouns to dict
+                for answer_letter in answer_list:
+                    answer = valid_dict[ex_idx][answer_letter]
+                    key = (question_stem, answer)
+                    noun_dict_valid[key] = get_spacy_info(answer)
+
+        # Test
+        question_stem = train_dict[ex_idx]['question.stem']
+        noun_dict_train[question_stem] = get_spacy_info(question_stem)
+        if len(noun_dict_train[question_stem]) == 0:
+                pdb.set_trace()
+        for answer_letter in answer_list:
+            answer = train_dict[ex_idx][answer_letter]
+            key = (question_stem, answer)
+            noun_dict_train[key] = get_spacy_info(answer)
+
+        # Incr Loop_Count 
+        loop_count += 1
+
+def trunc_and_calc_sim(stem, ans):
+    # Check if stem is larger than ans
+    if len(stem) > len(ans):
+        # Get ans embeds
+        ans_embeddings = np.ravel(get_token_embeddings(ans))
+        # Truncate stem until same length as ans
+        while len(stem) != len(ans):
+            # Random Pop
+            stem.pop(random.randint(0, len(stem)-1))
+        # Get Stem Embeddings
+        stem_embeddings = np.ravel(get_token_embeddings(stem))
+        # Get Cosine Similarity
+        similarity = cos_sim(stem_embeddings, ans_embeddings)
+        # Return
+        return similarity
+
+    # Check if ans is larger than stem
+    elif len(ans) > len(stem):
+        # Get stem embeds
+        stem_embeddings = np.ravel(get_token_embeddings(stem))
+        # Trunc answer until same length as stem
+        while len(stem) != len(ans):
+            try:
+                ans.pop(random.randint(0, len(stem)-1))
+            except:
+                pdb.set_trace()
+        # Get Ans Embeds
+        ans_embeddings = np.ravel(get_token_embeddings(ans))
+        # Get sim
+        similarity = cos_sim(stem_embeddings, ans_embeddings)
+        # Return 
+        return similarity
+    else:
+        # Get Embeds
+        stem_embeddings = np.ravel(get_token_embeddings(stem))
+        ans_embeddings = np.ravel(get_token_embeddings(ans))
+        # Get Similarity
+        similarity = cos_sim(stem_embeddings, ans_embeddings)
+        return similarity
+
+
+def truncate_and_eval(data_set, stem, a, b, c, d):
+    global noun_dict_train
+    global noun_dict_test
+    global noun_dict_valid 
+    # Get Correct Data Dict
+    if data_set == 'train':
+        data_dict = noun_dict_train
+    if data_set == 'test':
+        data_dict = noun_dict_test
+    if data_set == 'valid':
+        data_dict = noun_dict_valid
+    # Get Noun List 
+    stem_nouns = data_dict[stem]
+    ans_noun_list = [data_dict[(stem, a)], data_dict[(stem, b)], data_dict[(stem, c)], data_dict[(stem, d)]]
+    similarities = []
+    ans_letters = ['A', 'B', 'C', 'D']
+    # Truncate
+    for i in range(len(ans_noun_list)):
+        # Add tuple to similarities (answer_letter, similaritiy_score)
+        similarities.append((ans_letters[i], trunc_and_calc_sim(stem_nouns, ans_noun_list[i])))
+    # Return similarities
+    return similarities
+
+    
+def eliminate_choice(dataset: dict):
+    # Globals
+    global noun_dict_train
+    global noun_dict_test
+    global noun_dict_valid
+    # Get Dataset Dicts
+    train_dict = dataset['train']
+    test_dict = dataset['test']
+    valid_dict = dataset['validation']
+
     # Establish loop count
     loop_count = 0
     # loop through train dict
     for ex_idx in range(len(train_dict)):
         # Check if within len test
         if loop_count < len(test_dict):
-            # Dict to hold similarity scores
-            similarity_dict = {}
             # Get Stem and Question Choices
             stem = test_dict[ex_idx]['question.stem']
             choice_a = test_dict[ex_idx]['A']
             choice_b = test_dict[ex_idx]['B']
             choice_c = test_dict[ex_idx]['C']
             choice_d = test_dict[ex_idx]['D']
-            # Get embeddings
-            stem_embeds = np.ravel(get_token_embeddings(stem))
-            choice_a_embeds = np.ravel(get_token_embeddings(choice_a))
-            choice_b_embeds = np.ravel(get_token_embeddings(choice_b))
-            choice_c_embeds = np.ravel(get_token_embeddings(choice_c))
-            choice_d_embeds = np.ravel(get_token_embeddings(choice_d))
-            # Calc Cosine Similiarities (stem, answer)
-            sim_stem_a = cos_sim(stem_embeds, choice_a_embeds)
-            similarity_dict['stem-a'] = sim_stem_a
-            sim_stem_b = cos_sim(stem_embeds, choice_b_embeds)
-            similarity_dict['stem-b'] = sim_stem_b
-            sim_stem_c = cos_sim(stem_embeds, choice_c_embeds)
-            similarity_dict['stem-c'] = sim_stem_c
-            sim_stem_d = cos_sim(stem_embeds, choice_d_embeds)
-            similarity_dict['stem-d'] = sim_stem_d 
-            stem_sims = [(sim_stem_a, 'stem-a'), (sim_stem_b, 'stem-b'), (sim_stem_c, 'stem-c'), (sim_stem_d, 'stem-d')]
-            # Calc Cosine Similarities (answer-wise)
-            #sim_a_b = cos_sim(choice_a_embeds, choice_b_embeds)
-            #similarity_dict['a-b'] = sim_a_b
-            #sim_a_c = cos_sim(choice_a_embeds, choice_c_embeds)
-            #similarity_dict['a-c'] = sim_a_c
-            #sim_a_d = cos_sim(choice_a_embeds, choice_d_embeds)
-            #similarity_dict['a-d'] = sim_a_d
-            #sim_b_c = cos_sim(choice_b_embeds, choice_c_embeds)
-            #similarity_dict['b-c'] = sim_b_c
-            #sim_b_d = cos_sim(choice_b_embeds, choice_d_embeds)
-            #similarity_dict['b-d'] = sim_b_d
-            #sim_c_d = cos_sim(choice_c_embeds, choice_d_embeds)
-            #similarity_dict['c-d'] = sim_c_d
-            #answer_sims = ['a-b', 'a-c', 'a-d', 'b-c', 'b-d', 'c-d']
-
+            # Truncate and eval
+            scores = truncate_and_eval('test', stem, choice_a, choice_b, choice_c, choice_d) 
             # Find max similarity (stem, answer)
-            stem_sims.sort(key = lambda x:x[0]) 
-            kept_stem_sims = stem_sims[1:]
-
-            # Remove
-            answer_idx = stem_sims[0][1]
-            answer_idx = answer_idx.split('-')
-            answer_idx = answer_idx[1].upper()
-            del test_dict[ex_idx][answer_idx]
-
+            scores.sort(key = lambda x:x[1]) 
+            kept_scores = scores[1:]
+            # Remove least similar answer
+            answer_idx_to_remove = scores[0][0]
+            test_dict[ex_idx].pop(answer_idx_to_remove)
             
         # update valid
         if loop_count < len(valid_dict):
-            # Dict to hold similarity scores
-            similarity_dict = {}
             # Get Stem and Question Choices
             stem = valid_dict[ex_idx]['question.stem']
             choice_a = valid_dict[ex_idx]['A']
             choice_b = valid_dict[ex_idx]['B']
             choice_c = valid_dict[ex_idx]['C']
             choice_d = valid_dict[ex_idx]['D']
-            # Get embeddings
-            stem_embeds = np.ravel(get_token_embeddings(stem))
-            choice_a_embeds = np.ravel(get_token_embeddings(choice_a))
-            choice_b_embeds = np.ravel(get_token_embeddings(choice_b))
-            choice_c_embeds = np.ravel(get_token_embeddings(choice_c))
-            choice_d_embeds = np.ravel(get_token_embeddings(choice_d))
-            # Calc Cosine Similiarities (stem, answer)
-            sim_stem_a = cos_sim(stem_embeds, choice_a_embeds)
-            similarity_dict['stem-a'] = sim_stem_a
-            sim_stem_b = cos_sim(stem_embeds, choice_b_embeds)
-            similarity_dict['stem-b'] = sim_stem_b
-            sim_stem_c = cos_sim(stem_embeds, choice_c_embeds)
-            similarity_dict['stem-c'] = sim_stem_c
-            sim_stem_d = cos_sim(stem_embeds, choice_d_embeds)
-            similarity_dict['stem-d'] = sim_stem_d 
-            stem_sims = [(sim_stem_a, 'stem-a'), (sim_stem_b, 'stem-b'), (sim_stem_c, 'stem-c'), (sim_stem_d, 'stem-d')]
+            # Truncate and eval
+            scores = truncate_and_eval('valid', stem, choice_a, choice_b, choice_c, choice_d) 
             # Find max similarity (stem, answer)
-            stem_sims.sort(key = lambda x:x[0]) 
-            kept_stem_sims = stem_sims[1:]
-            # Remove
-            answer_idx = stem_sims[0][1]
-            answer_idx = answer_idx.split('-')
-            answer_idx = answer_idx[1].upper()
-            del test_dict[ex_idx][answer_idx]
+            scores.sort(key = lambda x:x[1]) 
+            kept_scores = scores[1:]
+            # Remove least similar answer
+            answer_idx_to_remove = scores[0][0]
+            valid_dict[ex_idx].pop(answer_idx_to_remove)
+            
 
         # Update Train 
         # Dict to hold similarity scores
@@ -168,31 +256,18 @@ def eliminate_choice(dataset: dict):
         choice_b = train_dict[ex_idx]['B']
         choice_c = train_dict[ex_idx]['C']
         choice_d = train_dict[ex_idx]['D']
-        # Get embeddings
-        stem_embeds = np.ravel(get_token_embeddings(stem))
-        choice_a_embeds = np.ravel(get_token_embeddings(choice_a))
-        choice_b_embeds = np.ravel(get_token_embeddings(choice_b))
-        choice_c_embeds = np.ravel(get_token_embeddings(choice_c))
-        choice_d_embeds = np.ravel(get_token_embeddings(choice_d))
-        # Calc Cosine Similiarities (stem, answer)
-        sim_stem_a = cos_sim(stem_embeds, choice_a_embeds)
-        similarity_dict['stem-a'] = sim_stem_a
-        sim_stem_b = cos_sim(stem_embeds, choice_b_embeds)
-        similarity_dict['stem-b'] = sim_stem_b
-        sim_stem_c = cos_sim(stem_embeds, choice_c_embeds)
-        similarity_dict['stem-c'] = sim_stem_c
-        sim_stem_d = cos_sim(stem_embeds, choice_d_embeds)
-        similarity_dict['stem-d'] = sim_stem_d 
-        stem_sims = [(sim_stem_a, 'stem-a'), (sim_stem_b, 'stem-b'), (sim_stem_c, 'stem-c'), (sim_stem_d, 'stem-d')] 
+        # Truncate and eval
+        scores = truncate_and_eval('train', stem, choice_a, choice_b, choice_c, choice_d) 
         # Find max similarity (stem, answer)
-        stem_sims.sort(key = lambda x:x[0]) 
-        kept_stem_sims = stem_sims[1:]
-        # Remove
-        answer_idx = stem_sims[0][1]
-        answer_idx = answer_idx.split('-')
-        answer_idx = answer_idx[1].upper()
-        del test_dict[ex_idx][answer_idx]
-
+        scores.sort(key = lambda x:x[1]) 
+        kept_scores = scores[1:]
+        # Remove least similar answer
+        answer_idx_to_remove = scores[0][0]
+        train_dict[ex_idx].pop(answer_idx_to_remove)
+        # Incr Loop Count
+        loop_count += 1
+        
+    return dataset
 
 def compute_metrics(eval_predictions):
     predictions, label_ids = eval_predictions
@@ -296,7 +371,7 @@ def main():
             json_list = list(json_file)
         for i in range(len(json_list)):
             json_str = json_list[i]
-#            pdb.set_trace()
+            #pdb.set_trace()
             result = json.loads(json_str)       
             print(result['fact1'])
             if facts == 0:
@@ -324,7 +399,8 @@ def main():
     updated = flatten.map(choices)
     updated = updated.rename_column('answerKey', 'label')
     load_glove_embeddings(50)
-    eliminate_choice(updated)
+    fill_noun_dicts(updated)
+    updated = eliminate_choice(updated)
     pdb.set_trace()
     pprint(updated['train'][0])
     
