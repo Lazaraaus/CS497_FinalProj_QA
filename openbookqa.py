@@ -69,13 +69,17 @@ def get_token_embeddings(token_seq):
 
     return embedding
 
-def get_spacy_info(token_seq):
+def get_spacy_info(token_seq, info):
     nouns = []
     # Run spaCy over string
     doc = nlp(token_seq)
     # lemmatized text, pos for nouns in string
     for token in doc:
-        nouns.append(token.lemma_) 
+        if info == None:
+            nouns.append(token.lemma_)
+        else:
+            if token.pos_ in info:
+                nouns.append(token.lemma_)
     if len(nouns) == 0:
         pdb.set_trace()
     return nouns
@@ -303,8 +307,33 @@ def eliminate_choice_new(json_data):
         question.update({'choices':choices})
         # Return Data
         return json.dumps(data), 'reg_delete'
-    
-    
+
+def process_jsonl_facts(jsonl_files):
+    output_files = ['train_complete_e_edited.jsonl', 'test_complete_e_edited.jsonl', 'dev_complete_e_edited.jsonl']
+    for jsonl_idx, jsonl_file in enumerate(jsonl_files):
+        json_data = pd.read_json(jsonl_file, lines = True)
+        json_data['keywords'] = json_data['question'].to_frame().apply(lambda x: stem_to_keywords(x), axis = 1)
+        print(json_data.head(30))
+        pdb.set_trace()
+        with open(jsonl_file, 'r') as json_file:
+            with open(output_files[jsonl_idx], 'w') as out_json:
+                json_list = list(json_file)
+                #for idx, 
+
+                pass
+def stem_to_keywords(df_row):
+    df_row = df_row.to_dict()
+    question = df_row['question']['stem']
+
+    return get_spacy_info(question, ['NOUN', 'PRON', 'ADJ', 'VERB', 'PROPN'])
+
+
+def load_cs_facts(data_dict):
+    file_name = 'data/OpenBookQA-V1-Sep2018/Data/Additional/crowdsourced-facts.txt'
+    with open(file_name) as file:
+        facts = file.readlines()
+        pdb.set_trace()
+    file.close()
 
 def process_json(jsonl_files):
     num_deleted = 0
@@ -418,26 +447,11 @@ def preprocess_function(examples):
         # Un-flatten
         return {k: [v[i:i+4] for i in range(0, len(v), 4)] for k, v in tokenized_examples.items()}
 
-    #elif flag == 1:
-        # Repeat each first sentence four times to go with the four possibilities of second sentences.
-        #first_sentences = [[context] * 3 for context in examples["fact1"]]
-        # Grab all second sentences possible for each context.
-        #question_headers = examples["question.stem"]
-        #second_sentences = [[f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)]
-        
-        # Flatten everything
-        #first_sentences = sum(first_sentences, [])
-        #second_sentences = sum(second_sentences, [])
-        
-        # Tokenize
-        #tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
-        # Un-flatten
-        #return {k: [v[i:i+3] for i in range(0, len(v), 3)] for k, v in tokenized_examples.items()}
     
     
 def main():
     
-    facts = 0
+    facts = 1
     flag = '' 
     input_files = ['data/OpenBookQA-V1-Sep2018/Data/Additional/train_complete.jsonl','data/OpenBookQA-V1-Sep2018/Data/Additional/test_complete.jsonl','data/OpenBookQA-V1-Sep2018/Data/Additional/dev_complete.jsonl']
     if facts == 0:
@@ -448,6 +462,7 @@ def main():
         flag = 0
     else:
         output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl']
+        process_jsonl_facts(output_files)
         flag = 0
     
     for io in range(3):
