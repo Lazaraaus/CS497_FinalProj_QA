@@ -17,7 +17,7 @@ import sys
 import json
 import numpy as np
 import spacy 
-spacy.prefer_gpu()
+#spacy.prefer_gpu()
 nlp = spacy.load("en_core_web_trf")
 
 
@@ -173,7 +173,6 @@ def trunc_and_calc_sim(stem, ans):
         similarity = cos_sim(stem_embeddings, ans_embeddings)
         return similarity
 
-
 def truncate_and_eval(data_set, stem, a, b, c, d):
     global noun_dict_train
     global noun_dict_test
@@ -196,7 +195,6 @@ def truncate_and_eval(data_set, stem, a, b, c, d):
         similarities.append((ans_letters[i], trunc_and_calc_sim(stem_nouns, ans_noun_list[i])))
     # Return similarities
     return similarities
-
     
 def eliminate_choice(dataset: dict):
     # Globals
@@ -269,6 +267,73 @@ def eliminate_choice(dataset: dict):
         
     return dataset
 
+def eliminate_choice_new(json_data):
+    # Load Data
+    data = json.loads(json_data)
+    question = data['question']
+    stem = question['stem']
+    choices = question['choices']
+    similarities = []
+    for i in range(4):
+        stem_info = get_spacy_info(stem)
+        choice_info = get_spacy_info(choices[i]['text'])
+        similarities.append((choices[i]['label'], trunc_and_calc_sim(stem_info, choice_info), i))
+    similarities.sort(key = lambda x:x[1])
+    # Check if label to be deleted is same as ansKey
+    if similarities[0][0] == data['answerKey']:
+        # If so, delete 2nd lowest sim
+        len_del_str = len(choices[similarities[1][2]]['text'].split())
+        deleted = {}
+        deleted['text'] = 'deleted' 
+        deleted['label'] = similarities[1][0]
+        choices[similarities[1][2]] = deleted
+        # Update w/ new Choices
+        question.update({'choices':choices})
+        # Return Data
+        return json.dumps(data), 'swap_delete'
+    # If not
+    else:
+        # Delete 
+        len_del_str = len(choices[similarities[0][2]]['text'].split())
+        deleted = {}
+        deleted['text'] = 'deleted' #' '.join(['deleted' for i in range(len_del_str)])
+        deleted['label'] = similarities[0][0]
+        choices[similarities[0][2]] = deleted
+        # Update w/ new Choices
+        question.update({'choices':choices})
+        # Return Data
+        return json.dumps(data), 'reg_delete'
+    
+    
+
+def process_json(jsonl_files):
+    num_deleted = 0
+    # Get JSONL as input
+    output_files = ['train_complete_d_edited.jsonl','test_complete_d_edited.jsonl','dev_complete_d_edited.jsonl']
+    # Load it
+    for jsonl_idx, jsonl_file in enumerate(jsonl_files):
+        with open(jsonl_file, 'r') as json_file:
+            with open(output_files[jsonl_idx], 'w') as out_json:
+                json_list = list(json_file)
+                out_json_list = []
+                for idx, json_data in enumerate(json_list):
+                    # Load & Process
+                    new_json_data = eliminate_choice_new(json_data) 
+                    if new_json_data == 'delete':
+                        # Skip example
+                        num_deleted += 1
+                        pass
+                    else:
+                        # Overwrite old jsonl file 
+                        out_json.write(new_json_data + "\n")
+                # Close Files
+                json_file.close() 
+                out_json.close()
+                # Print Number of Examples Removed
+                print(f"\nDeleted {num_deleted} from file: {jsonl_file}\n")
+                # Reset num_deleted
+                num_deleted = 0
+
 def compute_metrics(eval_predictions):
     predictions, label_ids = eval_predictions
     preds = np.argmax(predictions, axis=1)
@@ -339,31 +404,51 @@ def show_one(example):
     print(f"\nGround truth: option {example['label']}")    
     
 def preprocess_function(examples):
-    # Repeat each first sentence four times to go with the four possibilities of second sentences.
-    first_sentences = [[context] * 4 for context in examples["fact1"]]
-    # Grab all second sentences possible for each context.
-    question_headers = examples["question.stem"]
-    second_sentences = [[f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)]
-    
-    # Flatten everything
-    first_sentences = sum(first_sentences, [])
-    second_sentences = sum(second_sentences, [])
-    
-    # Tokenize
-    tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
-    # Un-flatten
-    return {k: [v[i:i+4] for i in range(0, len(v), 4)] for k, v in tokenized_examples.items()}
+        # Repeat each first sentence four times to go with the four possibilities of second sentences.
+        first_sentences = [[context] * 4 for context in examples["fact1"]]
+        # Grab all second sentences possible for each context.
+        question_headers = examples["question.stem"]
+        second_sentences = [[f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)]
+        
+        # Flatten everything
+        first_sentences = sum(first_sentences, [])
+        second_sentences = sum(second_sentences, [])
+        # Tokenize
+        tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
+        # Un-flatten
+        return {k: [v[i:i+4] for i in range(0, len(v), 4)] for k, v in tokenized_examples.items()}
+
+    #elif flag == 1:
+        # Repeat each first sentence four times to go with the four possibilities of second sentences.
+        #first_sentences = [[context] * 3 for context in examples["fact1"]]
+        # Grab all second sentences possible for each context.
+        #question_headers = examples["question.stem"]
+        #second_sentences = [[f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)]
+        
+        # Flatten everything
+        #first_sentences = sum(first_sentences, [])
+        #second_sentences = sum(second_sentences, [])
+        
+        # Tokenize
+        #tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
+        # Un-flatten
+        #return {k: [v[i:i+3] for i in range(0, len(v), 3)] for k, v in tokenized_examples.items()}
     
     
 def main():
     
     facts = 0
-
+    flag = '' 
     input_files = ['data/OpenBookQA-V1-Sep2018/Data/Additional/train_complete.jsonl','data/OpenBookQA-V1-Sep2018/Data/Additional/test_complete.jsonl','data/OpenBookQA-V1-Sep2018/Data/Additional/dev_complete.jsonl']
     if facts == 0:
         output_files = ['train_complete_d.jsonl','test_complete_d.jsonl','dev_complete_d.jsonl']
+        # Eliminate least similar answer choice from .jsonl 
+        load_glove_embeddings(50)
+        process_json(output_files)
+        flag = 0
     else:
         output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl']
+        flag = 0
     
     for io in range(3):
         file_name = input_files[io]
@@ -373,7 +458,7 @@ def main():
             json_str = json_list[i]
             #pdb.set_trace()
             result = json.loads(json_str)       
-            print(result['fact1'])
+            #print(result['fact1'])
             if facts == 0:
                 result['fact1'] = ''
             json_list[i] = json.dumps(result)
@@ -385,34 +470,34 @@ def main():
 
     batch_size = 16
     if facts == 0:
-        openbookQA = load_dataset('json', data_files={'train': 'train_complete_d.jsonl', 
-                                                      'validation': 'dev_complete_d.jsonl', 
-                                                      'test': 'test_complete_d.jsonl'})
+        openbookQA = load_dataset('json', data_files={'train': 'train_complete_d_edited.jsonl', 
+                                                      'validation': 'dev_complete_d_edited.jsonl', 
+                                                      'test': 'test_complete_d_edited.jsonl'})
     else:
         openbookQA = load_dataset('json', data_files={'train': 'train_complete_e.jsonl', 
                                                       'validation': 'dev_complete_e.jsonl', 
                                                       'test': 'test_complete_e.jsonl'})
-    pprint(openbookQA['train'][0])
-    
+    pprint(openbookQA['train'][0])  
     flatten = openbookQA.flatten()
     
     updated = flatten.map(choices)
     updated = updated.rename_column('answerKey', 'label')
-    load_glove_embeddings(50)
-    fill_noun_dicts(updated)
-    updated = eliminate_choice(updated)
-    pdb.set_trace()
     pprint(updated['train'][0])
     
     show_one(updated['train'][0])
     
     examples = updated['train'][:5]
     features = preprocess_function(examples)
-    print(len(features["input_ids"]), len(features["input_ids"][0]), [len(x) for x in features["input_ids"][0]])   
+    #print(len(features["input_ids"]), len(features["input_ids"][0]), [len(x) for x in features["input_ids"][0]])   
     
     idx = 3
-    [tokenizer.decode(features["input_ids"][idx][i]) for i in range(4)]    
-    show_one(updated['train'][idx])
+    # Facts == 1
+    if facts != 0:
+        [tokenizer.decode(features["input_ids"][idx][i]) for i in range(4)]    
+    # Facts == 0
+    else:
+        [tokenizer.decode(features["input_ids"][idx][i]) for i in range(3)]    
+    #show_one(updated['train'][idx])
     
     encoded_datasets = updated.map(preprocess_function, batched=True)
     
@@ -427,9 +512,12 @@ def main():
     accepted_keys = ["input_ids", "attention_mask", "label"]
     features = [{k: v for k, v in encoded_datasets["train"][i].items() if k in accepted_keys} for i in range(10)]
     batch = DataCollatorForMultipleChoice(tokenizer)(features)
-    
-    [tokenizer.decode(batch["input_ids"][8][i].tolist()) for i in range(4)]
-    show_one(updated["train"][8])
+   
+    if facts != 0:
+        [tokenizer.decode(batch["input_ids"][8][i].tolist()) for i in range(4)]
+    else: 
+        [tokenizer.decode(batch["input_ids"][8][i].tolist()) for i in range(3)]
+    #show_one(updated["train"][8])
 
     
 
