@@ -509,15 +509,15 @@ def preprocess_function(examples):
         if "fact2" in examples:
             fact2_sentences = [[context] * 4 for context in examples["fact2"]] 
         else:
-            fact2_sentences = None
+            fact2_sentences = []
         if "fact3" in examples:
             fact3_sentences = [[context] * 4 for context in examples["fact3"]] 
         else:
-            fact3_sentences = None
+            fact3_sentences = []
         if "fact4" in examples:
             fact4_sentences = [[context] * 4 for context in examples["fact4"]] 
         else:
-            fact4_sentences = None
+            fact4_sentences = []
 
         # Grab all second sentences possible for each context.
         question_headers = examples["question.stem"]
@@ -532,9 +532,13 @@ def preprocess_function(examples):
             fact3_sentences = sum(fact3_sentences, [])
         if fact4_sentences:
             fact4_sentences = sum(fact4_sentences, [])
-
+        first_sentences += fact2_sentences + fact3_sentences + fact4_sentences
         # Tokenize
-        tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
+        for idx, value in enumerate(first_sentences):
+            if value is None:
+                first_sentences[idx] = ''
+
+        tokenized_examples = tokenizer(first_sentences, second_sentences * 4, truncation=True)
         # Un-flatten
         return {k: [v[i:i+4] for i in range(0, len(v), 4)] for k, v in tokenized_examples.items()}
 
@@ -553,8 +557,8 @@ def main():
         flag = 0
     else:
         output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl'] 
-        load_glove_embeddings(50)
-        process_jsonl_facts(output_files)
+        #load_glove_embeddings(50)
+        #process_jsonl_facts(output_files)
         flag = 0
     
     for io in range(3):
@@ -581,9 +585,10 @@ def main():
                                                       'validation': 'dev_complete_d_edited.jsonl', 
                                                       'test': 'test_complete_d_edited.jsonl'})
     else:
-        openbookQA = load_dataset('json', data_files={'train': 'train_complete_e.jsonl', 
-                                                      'validation': 'dev_complete_e.jsonl', 
-                                                      'test': 'test_complete_e.jsonl'})
+        openbookQA = load_dataset('json', data_files={'train': 'train_complete_e_edited.jsonl', 
+                                                      'validation': 'dev_complete_e_edited.jsonl', 
+                                                      'test': 'test_complete_e_edited.jsonl'})
+    #pdb.set_trace()
     pprint(openbookQA['train'][0])  
     flatten = openbookQA.flatten()
     
