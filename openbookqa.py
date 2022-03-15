@@ -355,9 +355,9 @@ def process_jsonl_facts(jsonl_files):
                     example = json.loads(example)
                     if rel_facts_dict_1[idx] != '':
                         example['fact2'] = rel_facts_dict_1[idx]
-                    elif rel_facts_dict_2[idx] != '':
+                    if rel_facts_dict_2[idx] != '':
                         example['fact3'] = rel_facts_dict_2[idx]
-                    elif rel_facts_dict_3[idx] != '':
+                    if rel_facts_dict_3[idx] != '':
                         example['fact4'] = rel_facts_dict_3[idx]
                     example = json.dumps(example)
                     out_json.write(example + '\n')
@@ -506,6 +506,19 @@ def show_one(example):
 def preprocess_function(examples):
         # Repeat each first sentence four times to go with the four possibilities of second sentences.
         first_sentences = [[context] * 4 for context in examples["fact1"]]
+        if "fact2" in examples:
+            fact2_sentences = [[context] * 4 for context in examples["fact2"]] 
+        else:
+            fact2_sentences = None
+        if "fact3" in examples:
+            fact3_sentences = [[context] * 4 for context in examples["fact3"]] 
+        else:
+            fact3_sentences = None
+        if "fact4" in examples:
+            fact4_sentences = [[context] * 4 for context in examples["fact4"]] 
+        else:
+            fact4_sentences = None
+
         # Grab all second sentences possible for each context.
         question_headers = examples["question.stem"]
         second_sentences = [[f"{header} {examples[end][i]}" for end in ending_names] for i, header in enumerate(question_headers)]
@@ -513,6 +526,13 @@ def preprocess_function(examples):
         # Flatten everything
         first_sentences = sum(first_sentences, [])
         second_sentences = sum(second_sentences, [])
+        if fact2_sentences:
+            fact2_sentences = sum(fact2_sentences, [])
+        if fact3_sentences:
+            fact3_sentences = sum(fact3_sentences, [])
+        if fact4_sentences:
+            fact4_sentences = sum(fact4_sentences, [])
+
         # Tokenize
         tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
         # Un-flatten
@@ -580,6 +600,7 @@ def main():
     idx = 3
     # Facts == 1
     if facts != 0:
+        pdb.set_trace()
         [tokenizer.decode(features["input_ids"][idx][i]) for i in range(4)]    
     # Facts == 0
     else:
