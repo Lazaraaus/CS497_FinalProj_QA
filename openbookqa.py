@@ -57,7 +57,11 @@ def load_glove_embeddings(dim_size):
 
 def get_token_embeddings(token_seq):
     # Create np array of size len(token_seq) * embedding_dims
-    embedding = np.zeros((len(token_seq), DIM_SIZE))
+    try:
+        embedding = np.zeros((len(token_seq), DIM_SIZE))
+    except Exception as e:
+        print(Exception)
+        pdb.set_trace()
     # Loop through tokens in seq
     for idx, token in enumerate(token_seq):
         # Try to get embedding
@@ -309,31 +313,86 @@ def eliminate_choice_new(json_data):
         return json.dumps(data), 'reg_delete'
 
 def process_jsonl_facts(jsonl_files):
+    # List of Outfile names
     output_files = ['train_complete_e_edited.jsonl', 'test_complete_e_edited.jsonl', 'dev_complete_e_edited.jsonl']
+    # Load additional facts and keywords for additional facts
+    facts_keywords, facts = load_cs_facts(None)
+    # Loop through json files
     for jsonl_idx, jsonl_file in enumerate(jsonl_files):
+        # Read the JSON into a DF
         json_data = pd.read_json(jsonl_file, lines = True)
+        # Split Keywords into it's own column
         json_data['keywords'] = json_data['question'].to_frame().apply(lambda x: stem_to_keywords(x), axis = 1)
-        print(json_data.head(30))
-        pdb.set_trace()
+        # Open Jsonl file
         with open(jsonl_file, 'r') as json_file:
+            # Open Outfile
             with open(output_files[jsonl_idx], 'w') as out_json:
                 json_list = list(json_file)
-                #for idx, 
+                # Loop through examples
+                for idx, example in enumerate(json_list):
+                    ex_keywords = json_data['keywords'][idx]
+                    try:
+                        rel_facts = find_related_facts(ex_keywords, facts_keywords, 0.6)
+                    except:
+                       rel_facts = ['', '', ''] 
+                    else:
+                        rel_facts_dict_1 = {}
+                        rel_facts_dict_2 = {}
+                        rel_facts_dict_3 = {}
+                        # Loop through related facts
+                        for fact_idx, fact in enumerate(rel_facts):
+                            # Add to Fact
+                            if fact_idx == 0:
+                                rel_facts_dict_1[idx] = facts[fact] if fact != '' else ''
+                            if fact_idx == 1:
+                                rel_facts_dict_2[idx] = facts[fact] if fact != '' else ''
+                            if fact_idx == 2:
+                                rel_facts_dict_3[idx] = facts[fact] if fact != '' else ''
 
-                pass
+                # BP after both loops
+                pdb.set_trace()
+
+def find_related_facts(ex_keywords, fact_keywords, threshold):
+    try:
+        similarities = list(map(lambda x: trunc_and_calc_sim(x, ex_keywords), fact_keywords))
+    except Exception as e: 
+        print(Exception)
+    print("Getting good rows")
+    good_rows = []
+    for idx, sim in enumerate(similarities):
+        if sim >= threshold:
+            good_rows.append(idx)
+    
+    print(f"The Number of Rows above or equal to threshold is: {len(good_rows)}")
+    # Return Random Sample of 3
+    return random.sample(good_rows, 3)
+
+     
+
 def stem_to_keywords(df_row):
     df_row = df_row.to_dict()
     question = df_row['question']['stem']
 
-    return get_spacy_info(question, ['NOUN', 'PRON', 'ADJ', 'VERB', 'PROPN'])
+    return get_spacy_info(question, ['NOUN', 'PRON', 'ADJ', 'VERB', 'PROPN', 'ADV'])
 
 
 def load_cs_facts(data_dict):
     file_name = 'data/OpenBookQA-V1-Sep2018/Data/Additional/crowdsourced-facts.txt'
     with open(file_name) as file:
         facts = file.readlines()
-        pdb.set_trace()
     file.close()
+    facts = list(map(lambda x: x.replace('\n', ''), facts))
+    facts_keywords = list(map(lambda x : get_spacy_info(x, ['NOUN', 'PRON', 'ADJ', 'VERB', 'PROPN', 'ADV']), facts))
+    facts_keywords = list(map(lower_list, facts_keywords))
+
+    return facts_keywords, facts
+
+def lower_list(list_in):
+    return_lst = []
+    for item in list_in:
+        return_lst.append(item.lower())
+    return return_lst 
+
 
 def process_json(jsonl_files):
     num_deleted = 0
@@ -461,7 +520,8 @@ def main():
         process_json(output_files)
         flag = 0
     else:
-        output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl']
+        output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl'] 
+        load_glove_embeddings(50)
         process_jsonl_facts(output_files)
         flag = 0
     
