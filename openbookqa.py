@@ -44,7 +44,7 @@ def load_glove_embeddings(dim_size):
         print("Please select a dimension size that is 50, 100, 200, or 300")
     else:
         DIM_SIZE = dim_size
-        filename = 'glove_embeddings/glove.6B.' + str(dim_size) + 'd.txt'
+        filename = 'glove/glove.6B.' + str(dim_size) + 'd.txt'
         with open(filename, 'r', encoding='utf-8') as file:
             content = file.readlines()
             for line in content:
@@ -329,41 +329,53 @@ def process_jsonl_facts(jsonl_files):
             with open(output_files[jsonl_idx], 'w') as out_json:
                 json_list = list(json_file)
                 # Loop through examples
+                rel_facts_dict_1 = {}
+                rel_facts_dict_2 = {}
+                rel_facts_dict_3 = {}
+ 
                 for idx, example in enumerate(json_list):
                     ex_keywords = json_data['keywords'][idx]
                     try:
                         rel_facts = find_related_facts(ex_keywords, facts_keywords, 0.6)
                     except:
                        rel_facts = ['', '', ''] 
-                    else:
-                        rel_facts_dict_1 = {}
-                        rel_facts_dict_2 = {}
-                        rel_facts_dict_3 = {}
-                        # Loop through related facts
-                        for fact_idx, fact in enumerate(rel_facts):
+                    for fact_idx, fact in enumerate(rel_facts):
                             # Add to Fact
-                            if fact_idx == 0:
-                                rel_facts_dict_1[idx] = facts[fact] if fact != '' else ''
-                            if fact_idx == 1:
-                                rel_facts_dict_2[idx] = facts[fact] if fact != '' else ''
-                            if fact_idx == 2:
-                                rel_facts_dict_3[idx] = facts[fact] if fact != '' else ''
+                        if fact_idx == 0:
+                            rel_facts_dict_1[idx] = facts[fact] if fact != '' else ''
+                        if fact_idx == 1:
+                            rel_facts_dict_2[idx] = facts[fact] if fact != '' else ''
+                        if fact_idx == 2:
+                            rel_facts_dict_3[idx] = facts[fact] if fact != '' else ''
 
                 # BP after both loops
-                pdb.set_trace()
+                #df_facts_dict_1 = pd.DataFrame.from_dict(rel_facts_dict_1)
+                #df_facts_dict_2 = pd.DataFrame.from_dict(rel_facts_dict_2)
+                #df_facts_dict_3 = pd.DataFrame.from_dict(rel_facts_dict_3)
+                    example = json.loads(example)
+                    if rel_facts_dict_1[idx] != '':
+                        example['fact2'] = rel_facts_dict_1[idx]
+                    elif rel_facts_dict_2[idx] != '':
+                        example['fact3'] = rel_facts_dict_2[idx]
+                    elif rel_facts_dict_3[idx] != '':
+                        example['fact4'] = rel_facts_dict_3[idx]
+                    example = json.dumps(example)
+                    out_json.write(example + '\n')
+
+
+            out_json.close()
+            json_file.close()
 
 def find_related_facts(ex_keywords, fact_keywords, threshold):
     try:
         similarities = list(map(lambda x: trunc_and_calc_sim(x, ex_keywords), fact_keywords))
     except Exception as e: 
         print(Exception)
-    print("Getting good rows")
     good_rows = []
     for idx, sim in enumerate(similarities):
         if sim >= threshold:
             good_rows.append(idx)
     
-    print(f"The Number of Rows above or equal to threshold is: {len(good_rows)}")
     # Return Random Sample of 3
     return random.sample(good_rows, 3)
 
