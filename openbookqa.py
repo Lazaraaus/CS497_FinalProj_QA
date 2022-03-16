@@ -44,7 +44,7 @@ def load_glove_embeddings(dim_size):
         print("Please select a dimension size that is 50, 100, 200, or 300")
     else:
         DIM_SIZE = dim_size
-        filename = 'glove/glove.6B.' + str(dim_size) + 'd.txt'
+        filename = 'glove_embeddings/glove.6B.' + str(dim_size) + 'd.txt'
         with open(filename, 'r', encoding='utf-8') as file:
             content = file.readlines()
             for line in content:
@@ -336,7 +336,7 @@ def process_jsonl_facts(jsonl_files):
                 for idx, example in enumerate(json_list):
                     ex_keywords = json_data['keywords'][idx]
                     try:
-                        rel_facts = find_related_facts(ex_keywords, facts_keywords, 0.6)
+                        rel_facts = find_related_facts(ex_keywords, facts_keywords, 0.85)
                     except:
                        rel_facts = ['', '', ''] 
                     for fact_idx, fact in enumerate(rel_facts):
@@ -532,19 +532,29 @@ def preprocess_function(examples):
             fact3_sentences = sum(fact3_sentences, [])
         if fact4_sentences:
             fact4_sentences = sum(fact4_sentences, [])
-        first_sentences += fact2_sentences + fact3_sentences + fact4_sentences
-        # Tokenize
-        for idx, value in enumerate(first_sentences):
-            if value is None:
-                first_sentences[idx] = ''
+        
+        for idx, first_sentence in enumerate(first_sentences):
+            if idx < len(fact2_sentences):
+                if fact2_sentences[idx] != None:
+                    first_sentence += ' ' + fact2_sentences[idx]                
+            if idx < len(fact3_sentences):
+                if fact3_sentences[idx] != None:
+                    first_sentence += ' ' + fact3_sentences[idx]
+            if idx < len(fact4_sentences): 
+                 if fact4_sentences[idx] != None:
+                    first_sentence += ' ' + fact4_sentences[idx]
 
-        tokenized_examples = tokenizer(first_sentences, second_sentences * 4, truncation=True)
+            first_sentences[idx] = first_sentence
+
+        #first_sentences += fact2_sentences + fact3_sentences + fact4_sentences
+        # Tokenize
+        tokenized_examples = tokenizer(first_sentences, second_sentences, truncation=True)
         # Un-flatten
         return {k: [v[i:i+4] for i in range(0, len(v), 4)] for k, v in tokenized_examples.items()}
 
     
     
-def main():
+def main(process_flag):
     
     facts = 1
     flag = '' 
@@ -557,8 +567,10 @@ def main():
         flag = 0
     else:
         output_files = ['train_complete_e.jsonl','test_complete_e.jsonl','dev_complete_e.jsonl'] 
-        #load_glove_embeddings(50)
-        #process_jsonl_facts(output_files)
+        if process_flag:
+            load_glove_embeddings(50)
+            process_jsonl_facts(output_files)
+        #pdb.set_trace()
         flag = 0
     
     for io in range(3):
@@ -579,7 +591,7 @@ def main():
             fout.write('%s\n' % json_list[i])
         fout.close()
 
-    batch_size = 16
+    batch_size = 8
     if facts == 0:
         openbookQA = load_dataset('json', data_files={'train': 'train_complete_d_edited.jsonl', 
                                                       'validation': 'dev_complete_d_edited.jsonl', 
@@ -605,7 +617,6 @@ def main():
     idx = 3
     # Facts == 1
     if facts != 0:
-        pdb.set_trace()
         [tokenizer.decode(features["input_ids"][idx][i]) for i in range(4)]    
     # Facts == 0
     else:
@@ -650,4 +661,5 @@ def main():
     print(final_eval)
          
 if __name__ == "__main__":
-    main()
+    torch.cuda.empty_cache()
+    main(True)
